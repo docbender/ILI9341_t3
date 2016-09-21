@@ -16,12 +16,14 @@
   MIT license, all text above must be included in any redistribution
  ****************************************************/
 
-#ifndef _ILI9341_t3H_
-#define _ILI9341_t3H_
+#ifndef _ILI9341_ESPH_
+#define _ILI9341_ESPH_
 
 #ifdef __cplusplus
 #include "Arduino.h"
 #endif
+
+#include <SPI.h>
 
 #define ILI9341_TFTWIDTH  240
 #define ILI9341_TFTHEIGHT 320
@@ -124,15 +126,15 @@ typedef struct {
 	unsigned char bits_delta;
 	unsigned char line_space;
 	unsigned char cap_height;
-} ILI9341_t3_font_t;
+} ILI9341_ESP_font_t;
 
 
 #ifdef __cplusplus
 
-class ILI9341_t3 : public Print
+class ILI9341_ESP : public Print
 {
   public:
-	ILI9341_t3(uint8_t _CS, uint8_t _DC, uint8_t _RST = 255, uint8_t _MOSI=11, uint8_t _SCLK=13, uint8_t _MISO=12);
+	ILI9341_ESP(uint8_t _CS, uint8_t _DC, uint8_t _RST = 255);
 	void begin(void);
   	void sleep(bool enable);		
 	void pushColor(uint16_t color);
@@ -184,7 +186,7 @@ class ILI9341_t3 : public Print
 	void drawRect(int16_t x, int16_t y, int16_t w, int16_t h, uint16_t color);
 	int16_t getCursorX(void) const { return cursor_x; }
 	int16_t getCursorY(void) const { return cursor_y; }
-	void setFont(const ILI9341_t3_font_t &f) { font = &f; }
+	void setFont(const ILI9341_ESP_font_t &f) { font = &f; }
 	void setFontAdafruit(void) { font = NULL; }
 	void drawFontChar(unsigned int c);
 
@@ -195,12 +197,11 @@ class ILI9341_t3 : public Print
 	uint16_t textcolor, textbgcolor;
 	uint8_t textsize, rotation;
 	boolean wrap; // If set, 'wrap' text at right edge of display
-	const ILI9341_t3_font_t *font;
+	const ILI9341_ESP_font_t *font;
 
   	uint8_t  _rst;
   	uint8_t _cs, _dc;
-	uint8_t pcs_data, pcs_command;
-	uint8_t _miso, _mosi, _sclk;
+//	uint8_t pcs_data, pcs_command;
 
 	void setAddr(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1)
 	  __attribute__((always_inline)) {
@@ -211,67 +212,61 @@ class ILI9341_t3 : public Print
 		writedata16_cont(y0);   // YSTART
 		writedata16_cont(y1);   // YEND
 	}
-	//void waitFifoNotFull(void) __attribute__((always_inline)) {
-	void waitFifoNotFull(void) {
-		uint32_t sr;
-		uint32_t tmp __attribute__((unused));
-		do {
-			sr = KINETISK_SPI0.SR;
-			if (sr & 0xF0) tmp = KINETISK_SPI0.POPR;  // drain RX FIFO
-		} while ((sr & (15 << 12)) > (3 << 12));
-	}
-	void waitFifoEmpty(void) {
-		uint32_t sr;
-		uint32_t tmp __attribute__((unused));
-		do {
-			sr = KINETISK_SPI0.SR;
-			if (sr & 0xF0) tmp = KINETISK_SPI0.POPR;  // drain RX FIFO
-		} while ((sr & 0xF0F0) > 0);             // wait both RX & TX empty
-	}
-	void waitTransmitComplete(void) __attribute__((always_inline)) {
-		uint32_t tmp __attribute__((unused));
-		while (!(KINETISK_SPI0.SR & SPI_SR_TCF)) ; // wait until final output done
-		tmp = KINETISK_SPI0.POPR;                  // drain the final RX FIFO word
-	}
-	void waitTransmitComplete(uint32_t mcr) __attribute__((always_inline)) {
-		uint32_t tmp __attribute__((unused));
-		while (1) {
-			uint32_t sr = KINETISK_SPI0.SR;
-			if (sr & SPI_SR_EOQF) break;  // wait for last transmit
-			if (sr &  0xF0) tmp = KINETISK_SPI0.POPR;
-		}
-		KINETISK_SPI0.SR = SPI_SR_EOQF;
-		SPI0_MCR = mcr;
-		while (KINETISK_SPI0.SR & 0xF0) {
-			tmp = KINETISK_SPI0.POPR;
-		}
-	}
+   
+   //write command
 	void writecommand_cont(uint8_t c) __attribute__((always_inline)) {
-		KINETISK_SPI0.PUSHR = c | (pcs_command << 16) | SPI_PUSHR_CTAS(0) | SPI_PUSHR_CONT;
-		waitFifoNotFull();
+      digitalWrite(_dc, LOW);
+      digitalWrite(_cs, LOW);
+      
+      SPI.transfer(c);
+  
+      digitalWrite(_cs, HIGH);
+		//KINETISK_SPI0.PUSHR = c | (pcs_command << 16) | SPI_PUSHR_CTAS(0) | SPI_PUSHR_CONT;
+		//waitFifoNotFull();
 	}
+   
+   //write data byte
 	void writedata8_cont(uint8_t c) __attribute__((always_inline)) {
-		KINETISK_SPI0.PUSHR = c | (pcs_data << 16) | SPI_PUSHR_CTAS(0) | SPI_PUSHR_CONT;
-		waitFifoNotFull();
+      digitalWrite(_dc, HIGH);
+      digitalWrite(_cs, LOW);      
+      
+      SPI.transfer(c);
+  
+      digitalWrite(_cs, HIGH);
+      
+		//KINETISK_SPI0.PUSHR = c | (pcs_data << 16) | SPI_PUSHR_CTAS(0) | SPI_PUSHR_CONT;
+		//waitFifoNotFull();
 	}
+   
+   //write data word
 	void writedata16_cont(uint16_t d) __attribute__((always_inline)) {
-		KINETISK_SPI0.PUSHR = d | (pcs_data << 16) | SPI_PUSHR_CTAS(1) | SPI_PUSHR_CONT;
-		waitFifoNotFull();
+      digitalWrite(_dc, HIGH);
+      digitalWrite(_cs, LOW);      
+      
+      SPI.transfer16(d);
+  
+      digitalWrite(_cs, HIGH);      
+		
+      //KINETISK_SPI0.PUSHR = d | (pcs_data << 16) | SPI_PUSHR_CTAS(1) | SPI_PUSHR_CONT;
+		//waitFifoNotFull();
 	}
 	void writecommand_last(uint8_t c) __attribute__((always_inline)) {
-		uint32_t mcr = SPI0_MCR;
-		KINETISK_SPI0.PUSHR = c | (pcs_command << 16) | SPI_PUSHR_CTAS(0) | SPI_PUSHR_EOQ;
-		waitTransmitComplete(mcr);
+      writecommand_cont(c);
+		//uint32_t mcr = SPI0_MCR;
+		//KINETISK_SPI0.PUSHR = c | (pcs_command << 16) | SPI_PUSHR_CTAS(0) | SPI_PUSHR_EOQ;
+		//waitTransmitComplete(mcr);
 	}
 	void writedata8_last(uint8_t c) __attribute__((always_inline)) {
-		uint32_t mcr = SPI0_MCR;
-		KINETISK_SPI0.PUSHR = c | (pcs_data << 16) | SPI_PUSHR_CTAS(0) | SPI_PUSHR_EOQ;
-		waitTransmitComplete(mcr);
+      writedata8_cont(c);
+		//uint32_t mcr = SPI0_MCR;
+		//KINETISK_SPI0.PUSHR = c | (pcs_data << 16) | SPI_PUSHR_CTAS(0) | SPI_PUSHR_EOQ;
+		//waitTransmitComplete(mcr);
 	}
 	void writedata16_last(uint16_t d) __attribute__((always_inline)) {
-		uint32_t mcr = SPI0_MCR;
-		KINETISK_SPI0.PUSHR = d | (pcs_data << 16) | SPI_PUSHR_CTAS(1) | SPI_PUSHR_EOQ;
-		waitTransmitComplete(mcr);
+      writedata16_cont(d);
+		//uint32_t mcr = SPI0_MCR;
+		//KINETISK_SPI0.PUSHR = d | (pcs_data << 16) | SPI_PUSHR_CTAS(1) | SPI_PUSHR_EOQ;
+		//waitTransmitComplete(mcr);
 	}
 	void HLine(int16_t x, int16_t y, int16_t w, uint16_t color)
 	  __attribute__((always_inline)) {
@@ -295,13 +290,13 @@ class ILI9341_t3 : public Print
 };
 
 #ifndef swap
-#define swap(a, b) { typeof(a) t = a; a = b; b = t; }
+#define swap(a, b) { int16_t t = a; a = b; b = t; }
 #endif
 
 class Adafruit_GFX_Button {
 public:
 	Adafruit_GFX_Button(void) { _gfx = NULL; }
-	void initButton(ILI9341_t3 *gfx, int16_t x, int16_t y,
+	void initButton(ILI9341_ESP *gfx, int16_t x, int16_t y,
 		uint8_t w, uint8_t h,
 		uint16_t outline, uint16_t fill, uint16_t textcolor,
 		const char *label, uint8_t textsize);
@@ -315,7 +310,7 @@ public:
 	bool justPressed() { return (currstate && !laststate); }
 	bool justReleased() { return (!currstate && laststate); }
 private:
-	ILI9341_t3 *_gfx;
+	ILI9341_ESP *_gfx;
 	int16_t _x, _y;
 	uint16_t _w, _h;
 	uint8_t _textsize;
