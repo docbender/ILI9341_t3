@@ -56,6 +56,7 @@
 #define ILI9341_RAMRD   0x2E
 
 #define ILI9341_PTLAR    0x30
+#define ILI9341_VSCRDEF  0x33  
 #define ILI9341_MADCTL   0x36
 #define ILI9341_VSCRSADD 0x37
 #define ILI9341_PIXFMT   0x3A
@@ -136,6 +137,7 @@ class ILI9341_ESP : public Print
   public:
 	ILI9341_ESP(uint8_t _CS, uint8_t _DC, uint8_t _RST = 255);
 	void begin(void);
+   void beginTransaction(void);
   	void sleep(bool enable);		
 	void pushColor(uint16_t color);
 	void fillScreen(uint16_t color);
@@ -144,6 +146,9 @@ class ILI9341_ESP : public Print
 	void drawFastHLine(int16_t x, int16_t y, int16_t w, uint16_t color);
 	void fillRect(int16_t x, int16_t y, int16_t w, int16_t h, uint16_t color);
 	void setRotation(uint8_t r);
+   // defines vertical scroll area
+   void setupScroll(uint16_t topArea, int16_t scrollArea, int16_t bottomArea);
+   // set scroll offset that scrollarea is moved
 	void setScroll(uint16_t offset);
 	void invertDisplay(boolean i);
 	void setAddrWindow(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1);
@@ -189,6 +194,8 @@ class ILI9341_ESP : public Print
 	void setFont(const ILI9341_ESP_font_t &f) { font = &f; }
 	void setFontAdafruit(void) { font = NULL; }
 	void drawFontChar(unsigned int c);
+   
+   uint32_t cleanPrint( uint32_t oldV, uint32_t newV, uint16_t fgc, uint16_t bgc, int xxt, int yyt );
 
 
  protected:
@@ -202,7 +209,76 @@ class ILI9341_ESP : public Print
   	uint8_t  _rst;
   	uint8_t _cs, _dc;
 //	uint8_t pcs_data, pcs_command;
+  
+   void waittransfercompleted()__attribute__((always_inline))
+   {
+      while(SPI1CMD & SPIBUSY) {}
+   }    
+   
+   void initializedatatransfer(void)__attribute__((always_inline))
+   {
+      //waittransfercompleted();
+      
+      digitalWrite(_dc, HIGH);
+      digitalWrite(_cs, LOW);
+   }  
+   
+   void startbuffertransfer(uint16_t bytescount)__attribute__((always_inline))
+   {
+      SPI.setDataBits(bytescount*8);
+      SPI1CMD |= SPIBUSY;
+   }     
+ 
+   void finishtransfer(void)__attribute__((always_inline))
+   {
+      waittransfercompleted();
+      digitalWrite(_cs, HIGH);
+   }    
+   
+   volatile uint8_t* writeinSPIbuffer(volatile uint8_t *buffer, uint8_t data) __attribute__((always_inline))
+   {
+      *buffer = data;
+      buffer++;
+      
+      return buffer;
+   }    
+   
+   volatile uint16_t* writeinSPIbuffer(volatile uint16_t *buffer, uint16_t data) __attribute__((always_inline))
+   {
+      *buffer = data >> 8 | data << 8;
+      buffer++;
+      
+      return buffer;
+   }    
 
+/*	void setAddr(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1)
+	  __attribute__((always_inline)) {
+		writecommand_cont(ILI9341_CASET); // Column addr set
+      //writedata16_cont(x0);   // XSTART
+
+      initializedatatransfer();
+      SPI.setDataBits(4*8);
+      
+      volatile uint16_t *buffer = (volatile uint16_t*)&SPI1W0;
+      // XSTART
+      buffer = writeinSPIbuffer(buffer,x0);
+      buffer = writeinSPIbuffer(buffer,x1);
+  
+      SPI1CMD |= SPIBUSY;
+      while(SPI1CMD & SPIBUSY) {}
+//      writedata16_cont(x1);   // XEND
+		writecommand_cont(ILI9341_PASET); // Row addr set
+      buffer = (volatile uint16_t*)&SPI1W0;
+      initializedatatransfer();
+      SPI.setDataBits(4*8);
+      buffer = writeinSPIbuffer(buffer,y0);
+      buffer = writeinSPIbuffer(buffer,y1);
+      SPI.setDataBits(4*8);
+      SPI1CMD |= SPIBUSY;
+  
+      finishtransfer();      
+	}*/
+   
 	void setAddr(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1)
 	  __attribute__((always_inline)) {
 		writecommand_cont(ILI9341_CASET); // Column addr set
@@ -211,74 +287,106 @@ class ILI9341_ESP : public Print
 		writecommand_cont(ILI9341_PASET); // Row addr set
 		writedata16_cont(y0);   // YSTART
 		writedata16_cont(y1);   // YEND
-	}
+   }
+   
    
    //write command
 	void writecommand_cont(uint8_t c) __attribute__((always_inline)) {
+      waittransfercompleted();     
+      
       digitalWrite(_dc, LOW);
       digitalWrite(_cs, LOW);
       
-      SPI.transfer(c);
-  
-      digitalWrite(_cs, HIGH);
-		//KINETISK_SPI0.PUSHR = c | (pcs_command << 16) | SPI_PUSHR_CTAS(0) | SPI_PUSHR_CONT;
-		//waitFifoNotFull();
+      SPI.write(c);
 	}
    
    //write data byte
 	void writedata8_cont(uint8_t c) __attribute__((always_inline)) {
+      waittransfercompleted();
+      
       digitalWrite(_dc, HIGH);
       digitalWrite(_cs, LOW);      
       
-      SPI.transfer(c);
-  
-      digitalWrite(_cs, HIGH);
-      
-		//KINETISK_SPI0.PUSHR = c | (pcs_data << 16) | SPI_PUSHR_CTAS(0) | SPI_PUSHR_CONT;
-		//waitFifoNotFull();
+      SPI.write(c);
 	}
    
    //write data word
 	void writedata16_cont(uint16_t d) __attribute__((always_inline)) {
+      waittransfercompleted();
+      
       digitalWrite(_dc, HIGH);
       digitalWrite(_cs, LOW);      
       
-      SPI.transfer16(d);
-  
-      digitalWrite(_cs, HIGH);      
-		
-      //KINETISK_SPI0.PUSHR = d | (pcs_data << 16) | SPI_PUSHR_CTAS(1) | SPI_PUSHR_CONT;
-		//waitFifoNotFull();
+      SPI.write16(d);
 	}
+
 	void writecommand_last(uint8_t c) __attribute__((always_inline)) {
       writecommand_cont(c);
-		//uint32_t mcr = SPI0_MCR;
-		//KINETISK_SPI0.PUSHR = c | (pcs_command << 16) | SPI_PUSHR_CTAS(0) | SPI_PUSHR_EOQ;
-		//waitTransmitComplete(mcr);
+      
+      finishtransfer();  
 	}
 	void writedata8_last(uint8_t c) __attribute__((always_inline)) {
       writedata8_cont(c);
-		//uint32_t mcr = SPI0_MCR;
-		//KINETISK_SPI0.PUSHR = c | (pcs_data << 16) | SPI_PUSHR_CTAS(0) | SPI_PUSHR_EOQ;
-		//waitTransmitComplete(mcr);
+      
+      finishtransfer();   
 	}
 	void writedata16_last(uint16_t d) __attribute__((always_inline)) {
       writedata16_cont(d);
-		//uint32_t mcr = SPI0_MCR;
-		//KINETISK_SPI0.PUSHR = d | (pcs_data << 16) | SPI_PUSHR_CTAS(1) | SPI_PUSHR_EOQ;
-		//waitTransmitComplete(mcr);
+      
+      finishtransfer();   
 	}
+   
+   void fillPreparedArea(uint32_t length, uint16_t color) __attribute__((always_inline)) {   
+      volatile uint16_t *fifoPtr = (volatile uint16_t*)&SPI1W0;
+      volatile uint16_t *actualPtr = (volatile uint16_t*)&SPI1W0;
+      uint32_t words; //SPI FIFO has 64 bytes 
+      uint16_t swapColor = color >> 8 | color << 8;
+
+      if(length<32)
+      {
+         SPI.setDataBits(length*16); 
+         words = length;
+      }
+      else
+      {
+         SPI.setDataBits(64*8); 
+         words = 32;
+      }
+      
+      initializedatatransfer();
+       
+      while (length-- > 0)  
+      { 
+         *actualPtr = swapColor;
+         actualPtr++;
+         
+         if(--words == 0)
+         {
+            SPI1CMD |= SPIBUSY;
+            words = 32;
+            actualPtr = fifoPtr;                       
+            while(SPI1CMD & SPIBUSY) {}
+            
+            if(length<32)
+            {
+               words = length;
+               SPI.setDataBits(length*16);
+            }           
+         }              
+      } 
+   }
+      
 	void HLine(int16_t x, int16_t y, int16_t w, uint16_t color)
 	  __attribute__((always_inline)) {
 		setAddr(x, y, x+w-1, y);
-		writecommand_cont(ILI9341_RAMWR);
-		do { writedata16_cont(color); } while (--w > 0);
+		writecommand_cont(ILI9341_RAMWR);      
+      fillPreparedArea(w, color);
 	}
 	void VLine(int16_t x, int16_t y, int16_t h, uint16_t color)
 	  __attribute__((always_inline)) {
 		setAddr(x, y, x, y+h-1);
 		writecommand_cont(ILI9341_RAMWR);
-		do { writedata16_cont(color); } while (--h > 0);
+      fillPreparedArea(h, color);
 	}
 	void Pixel(int16_t x, int16_t y, uint16_t color)
 	  __attribute__((always_inline)) {
@@ -288,6 +396,7 @@ class ILI9341_ESP : public Print
 	}
 	void drawFontBits(uint32_t bits, uint32_t numbits, uint32_t x, uint32_t y, uint32_t repeat);
 };
+
 
 #ifndef swap
 #define swap(a, b) { int16_t t = a; a = b; b = t; }
