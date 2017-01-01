@@ -39,6 +39,9 @@ ILI9341_ESP::ILI9341_ESP(uint8_t cs, uint8_t dc, uint8_t rst)
 	textcolor = textbgcolor = 0xFFFF;
 	wrap      = true;
 	font      = NULL;
+   _utf8_buffer = 0;
+   _utf8_state = UTF8_STATE::UTF8_INVALID;
+   _utf8_byte_count = 0;   
 }
 
 void ILI9341_ESP::beginTransaction(void)
@@ -108,7 +111,10 @@ void ILI9341_ESP::fillRect(int16_t x, int16_t y, int16_t w, int16_t h, uint16_t 
 	// it'll cost more overhead, so we don't stall other SPI libs
 	setAddr(x, y, x+w-1, y+h-1);
 	writecommand_cont(ILI9341_RAMWR);
-   SPI.setDataBits(64*8);   
+   if(w*h >= 32)
+      SPI.setDataBits(64*8);   
+   else
+      SPI.setDataBits(w*h*16);   
   
    initializedatatransfer();
    
@@ -138,6 +144,133 @@ void ILI9341_ESP::fillRect(int16_t x, int16_t y, int16_t w, int16_t h, uint16_t 
 	}
 
    finishtransfer();
+}
+
+// fillRectVGradient	- fills area with vertical gradient
+void ILI9341_ESP::fillRectVGradient(int16_t x, int16_t y, int16_t w, int16_t h, uint16_t color1, uint16_t color2)
+{
+	// rudimentary clipping (drawChar w/big text requires this)
+	if((x >= _width) || (y >= _height)) return;
+	if((x + w - 1) >= _width)  w = _width  - x;
+	if((y + h - 1) >= _height) h = _height - y;
+	
+	int16_t r1, g1, b1, r2, g2, b2, dr, dg, db, r, g, b;
+	color565toRGB14(color1,r1,g1,b1);
+	color565toRGB14(color2,r2,g2,b2);
+	dr=(r2-r1)/h; dg=(g2-g1)/h; db=(b2-b1)/h;
+	r=r1;g=g1;b=b1;	
+   
+   uint32_t words;
+   volatile uint16_t *fifoPtr = (volatile uint16_t*)&SPI1W0;
+   volatile uint16_t *actualPtr = (volatile uint16_t*)&SPI1W0;
+   
+   if(w*h >= 32)
+   {
+      SPI.setDataBits(64*8);
+      words = 32;
+   }
+   else
+   {
+      words = w*h;
+      SPI.setDataBits(words*16);
+   }
+       
+	for(y=h; y>0; y--) {
+      uint16_t color = RGB14tocolor565(r,g,b);
+      color = (color >> 8 | color << 8);
+      
+		for(x=w; x>0; x--) {
+         *actualPtr = color;
+         actualPtr++;
+         if(--words == 0)
+         {
+            SPI1CMD |= SPIBUSY;
+            words = 32;
+            actualPtr = fifoPtr;                       
+            while(SPI1CMD & SPIBUSY) {}
+            
+            if((y == 1) && x<32)
+            {
+               words = x;
+               SPI.setDataBits(x*16);                           
+            }           
+         }
+      }
+      r+=dr;g+=dg;b+=db;      
+	}
+
+   finishtransfer();   
+}
+
+// fillRectHGradient	- fills area with horizontal gradient
+void ILI9341_ESP::fillRectHGradient(int16_t x, int16_t y, int16_t w, int16_t h, uint16_t color1, uint16_t color2)
+{
+	// rudimentary clipping (drawChar w/big text requires this)
+	if((x >= _width) || (y >= _height)) return;
+	if((x + w - 1) >= _width)  w = _width  - x;
+	if((y + h - 1) >= _height) h = _height - y;
+	
+	int16_t r1, g1, b1, r2, g2, b2, dr, dg, db, r, g, b;
+	color565toRGB14(color1,r1,g1,b1);
+	color565toRGB14(color2,r2,g2,b2);
+	dr=(r2-r1)/h; dg=(g2-g1)/h; db=(b2-b1)/h;
+	r=r1;g=g1;b=b1;
+
+   uint32_t words;
+   volatile uint16_t *fifoPtr = (volatile uint16_t*)&SPI1W0;
+   volatile uint16_t *actualPtr = (volatile uint16_t*)&SPI1W0;
+   
+   if(w*h >= 32)
+   {
+      SPI.setDataBits(64*8);   
+      words = 32;
+   }
+   else
+   {
+      words = w*h;
+      SPI.setDataBits(words*16);   
+   }
+  
+   initializedatatransfer();   
+
+       
+	for(y=h; y>0; y--) {
+      uint16_t color;      
+		for(x=w; x>0; x--) {
+         color = RGB14tocolor565(r,g,b);
+         r+=dr;g+=dg;b+=db;
+         *actualPtr = (color >> 8 | color << 8);  
+         actualPtr++;
+         if(--words == 0)
+         {
+            SPI1CMD |= SPIBUSY;
+            words = 32;
+            actualPtr = fifoPtr;                       
+            while(SPI1CMD & SPIBUSY) {}
+            
+            if((y == 1) && x<32)
+            {
+               words = x;
+               SPI.setDataBits(x*16);                           
+            }           
+         }
+      }
+		r=r1;g=g1;b=b1;      
+	}
+
+   finishtransfer();      
+}
+
+// fillScreenVGradient - fills screen with vertical gradient
+void ILI9341_ESP::fillScreenVGradient(uint16_t color1, uint16_t color2)
+{
+	fillRectVGradient(0,0,_width,_height,color1,color2);
+}
+
+// fillScreenHGradient - fills screen with horizontal gradient
+void ILI9341_ESP::fillScreenHGradient(uint16_t color1, uint16_t color2)
+{
+	fillRectHGradient(0,0,_width,_height,color1,color2);
 }
 
 #define MADCTL_MY  0x80
@@ -179,7 +312,7 @@ void ILI9341_ESP::setRotation(uint8_t m)
 	cursor_y = 0;
 }
 
-void ILI9341_ESP::setupScroll(uint16_t topArea, int16_t scrollArea, int16_t bottomArea)
+void ILI9341_ESP::setupScroll(int16_t topArea, int16_t scrollArea, int16_t bottomArea)
 {
 	writecommand_cont(ILI9341_VSCRDEF);
    writedata16_cont(topArea);
@@ -187,7 +320,7 @@ void ILI9341_ESP::setupScroll(uint16_t topArea, int16_t scrollArea, int16_t bott
    writedata16_last(bottomArea);
 }
 
-void ILI9341_ESP::setScroll(uint16_t offset)
+void ILI9341_ESP::setScroll(int16_t offset)
 {
 	writecommand_cont(ILI9341_VSCRSADD);
 	writedata16_last(offset);
@@ -739,27 +872,53 @@ void ILI9341_ESP::drawBitmap(int16_t x, int16_t y,
   }
 }
 
-//Self Cleaning String print
-//Self Cleaning number print
-uint32_t ILI9341_ESP::cleanPrint( uint32_t oldV, uint32_t newV, uint16_t fgc, uint16_t bgc, int xxt, int yyt ) {
+//clear previously printed text(print with backgroud color)
+void ILI9341_ESP::sprintc(label &object){
+   setFont(*object.font);   
+   //location
+   setCursor(object.x, object.y);
+   //set background color to clear printed text
+   setTextColor(object.backgroundcolor);
+   //print last text
+   print(object.text);
+}
 
-  setCursor(xxt, yyt);
-  setTextColor(bgc);
-  print(oldV);
-  setCursor(xxt, yyt);
-  setTextColor(fgc);
-  print(newV);
-  return newV;
+//print text saved in label object(print with foregroud color)
+void ILI9341_ESP::sprints(label &object){
+   setFont(*object.font);
+   //print new text over same location
+   setCursor(object.x, object.y);
+   setTextColor(object.foregroundcolor);
+   print(object.text);
+}
+
+//clear previously printed text and over it print new one c_string
+void ILI9341_ESP::sprintcs(label &object, const char *s){ 
+   sprintc(object);
+   
+   size_t size = strlen(s);
+   //size restriction
+   if(size >= object.maxlength)
+      size = object.maxlength-1;
+
+   memcpy(object.text,s,size);
+   object.text[size] = 0;
+
+   sprints(object);
 }
 
 size_t ILI9341_ESP::write(uint8_t c)
 {
 	if (font) {
 		if (c == '\n') {
-			//cursor_y += ??
+			cursor_y += font->line_space;
 			cursor_x = 0;
 		} else {
-			drawFontChar(c);
+         nextUTF8State(c);
+
+         if (_utf8_state == UTF8_END) {
+            drawFontChar(_utf8_buffer);
+         }         
 		}
 	} else {
 		if (c == '\n') {
@@ -935,27 +1094,29 @@ static uint32_t fetchbits_signed(const uint8_t *p, uint32_t index, uint32_t requ
 	}
 	return (int32_t)val;
 }
-
-
 void ILI9341_ESP::drawFontChar(unsigned int c)
 {
 	uint32_t bitoffset;
 	const uint8_t *data;
 
-	//Serial.printf("drawFontChar %d\n", c);
-
-	if (c >= font->index1_first && c <= font->index1_last) {
+   //unicode support - thx GeoSpark
+	if (font->unicode) {
+ 		uint16_t table_length = (font->index1_first << 8) | font->index1_last;
+ 		uint32_t index = binarySearch(reinterpret_cast<const uint8_t*>(font->unicode), table_length, c);
+ 		if (index == 0xffff) {
+ 			index = 0;
+ 		}
+ 		bitoffset = index * font->bits_index;
+   } else if (c >= font->index1_first && c <= font->index1_last) {
 		bitoffset = c - font->index1_first;
 		bitoffset *= font->bits_index;
 	} else if (c >= font->index2_first && c <= font->index2_last) {
 		bitoffset = c - font->index2_first + font->index1_last - font->index1_first + 1;
 		bitoffset *= font->bits_index;
-	} else if (font->unicode) {
-		return; // TODO: implement sparse unicode
 	} else {
 		return;
 	}
-	//Serial.printf("  index =  %d\n", fetchbits_unsigned(font->index, bitoffset, font->bits_index));
+
 	data = font->data + fetchbits_unsigned(font->index, bitoffset, font->bits_index);
 
 	uint32_t encoding = fetchbits_unsigned(data, 0, 3);
@@ -1038,35 +1199,81 @@ void ILI9341_ESP::drawFontChar(unsigned int c)
 			y += n;
 			linecount -= n;
 		}
-		//if (++loopcount > 100) {
-			//Serial.println("     abort draw loop");
-			//break;
-		//}
 	}
+}
+
+// gets pixel length of given ASCII string
+size_t ILI9341_ESP::strPixelLen(const char * str)
+{
+	if (!str) return(0);
+	size_t len=0, maxlen=0;
+	while (*str)
+	{
+		if (*str=='\n')
+		{
+			if ( len > maxlen )
+			{
+				maxlen=len;
+				len=0;
+			}
+		}
+		else
+		{
+			if (!font)
+			{
+				len+=textsize*6;
+			}
+			else
+			{
+				uint32_t bitoffset;
+				const uint8_t *data;
+				uint16_t c = *str;
+
+				if (c >= font->index1_first && c <= font->index1_last) {
+					bitoffset = c - font->index1_first;
+					bitoffset *= font->bits_index;
+				} else if (c >= font->index2_first && c <= font->index2_last) {
+					bitoffset = c - font->index2_first + font->index1_last - font->index1_first + 1;
+					bitoffset *= font->bits_index;
+				} else if (font->unicode) {
+               uint16_t table_length = (font->index1_first << 8) | font->index1_last;
+               uint32_t index = binarySearch(reinterpret_cast<const uint8_t*>(font->unicode), table_length, c);
+               if (index == 0xffff) {
+                  index = 0;
+               }
+               bitoffset = index * font->bits_index;
+				} else {
+					continue;
+				}
+
+				data = font->data + fetchbits_unsigned(font->index, bitoffset, font->bits_index);
+
+				uint32_t encoding = fetchbits_unsigned(data, 0, 3);
+				if (encoding != 0) continue;
+
+				bitoffset = font->bits_width + 3;
+				bitoffset += font->bits_height;
+
+				bitoffset += font->bits_xoffset;
+				bitoffset += font->bits_yoffset;
+
+				uint32_t delta = fetchbits_unsigned(data, bitoffset, font->bits_delta);
+				bitoffset += font->bits_delta;
+
+				len += delta;//+width-xoffset;
+				if ( len > maxlen )
+				{
+					maxlen=len;
+				}			
+			}
+		}
+		str++;
+	}
+	return( maxlen );
 }
 
 void ILI9341_ESP::drawFontBits(uint32_t bits, uint32_t numbits, uint32_t x, uint32_t y, uint32_t repeat)
 {
-#if 0			
-	// TODO: replace this *slow* code with something fast...
-	//Serial.printf("      %d bits at %d,%d: %X\n", numbits, x, y, bits);
-	if (bits == 0) return;
-	do {
-		uint32_t x1 = x;
-		uint32_t n = numbits;
-		do {
-			n--;
-			if (bits & (1 << n)) {
-				drawPixel(x1, y, textcolor);
-				//Serial.printf("        pixel at %d,%d\n", x1, y);
-			}
-			x1++;
-		} while (n > 0);
-		y++;
-		repeat--;
-	} while (repeat);
-#endif
-#if 1
 	if (bits == 0) return;
 	int w = 0;
 	do {
@@ -1112,10 +1319,9 @@ void ILI9341_ESP::drawFontBits(uint32_t bits, uint32_t numbits, uint32_t x, uint
 		y++;
 		repeat--;
 	} while (repeat);
-#endif	
 }
 
-void ILI9341_ESP::setCursor(int16_t x, int16_t y) {
+void ILI9341_ESP::setCursor(int32_t x, int32_t y) {
 	if (x < 0) x = 0;
 	else if (x >= _width) x = _width - 1;
 	cursor_x = x;
@@ -1123,6 +1329,12 @@ void ILI9341_ESP::setCursor(int16_t x, int16_t y) {
 	else if (y >= _height) y = _height - 1;
 	cursor_y = y;
 }
+
+void ILI9341_ESP::getCursor(int32_t *x, int32_t *y) {
+  *x = cursor_x;
+  *y = cursor_y;
+}
+
 
 void ILI9341_ESP::setTextSize(uint8_t s) {
   textsize = (s > 0) ? s : 1;
@@ -1167,6 +1379,91 @@ void ILI9341_ESP::sleep(bool enable) {
 	}
 }
 
+void ILI9341_ESP::displayOff() {
+   writecommand_last(ILI9341_DISPOFF);
+}
+
+void ILI9341_ESP::displayOn() {
+   writecommand_last(ILI9341_DISPON);
+}
+
+void ILI9341_ESP::normalMode() {
+   writecommand_last(ILI9341_NORON);
+}
+
+uint32_t ILI9341_ESP::binarySearch(const uint8_t* data, const uint32_t length, const uint32_t value) {
+	if (data == NULL) {
+		return 0xffff;
+	}
+
+	if (value < fetchbits_unsigned(data, 0, 21) || value > fetchbits_unsigned(data, (length - 1) * 21, 21)) {
+		return 0xffff;
+	}
+
+	uint32_t low = 0;
+	uint32_t high = length - 1;
+
+	while (low <= high) {
+		uint32_t middle = (low + high) >> 1;
+
+		uint32_t d = fetchbits_unsigned(data, middle * 21, 21);
+
+		if (d > value) {
+			high = middle - 1;
+		} else if (d < value) {
+			low = middle + 1;
+		} else {
+			return middle;
+		}
+	}
+
+   return 0xffff;
+}
+
+void ILI9341_ESP::nextUTF8State(const uint8_t c) {
+   if (c < 128) {
+      _utf8_state = UTF8_END;
+      _utf8_byte_count = 0;
+      _utf8_buffer = c;
+      return;
+   }
+   if (_utf8_state == UTF8_INVALID || _utf8_state == UTF8_END) {
+      if ((c & 0xe0) == 0xc0) {
+         _utf8_byte_count = 1;
+         _utf8_state = UTF8_VALID;
+         _utf8_buffer = c & 0x1f;
+      } else if ((c & 0xf0) == 0xe0) {
+         _utf8_byte_count = 2;
+         _utf8_state = UTF8_VALID;
+         _utf8_buffer = c & 0x0f;
+      } else if ((c & 0xf8) == 0xf0) {
+         _utf8_byte_count = 3;
+         _utf8_state = UTF8_VALID;
+         _utf8_buffer = c & 0x07;
+      } else {
+         _utf8_state = UTF8_INVALID;
+      }
+      return;
+   }
+
+   if (_utf8_state == UTF8_VALID) {
+      if ((c & 0xc0) == 0x80) {
+         _utf8_buffer = (_utf8_buffer << 6) | (c & 0x3f);
+         --_utf8_byte_count;
+
+         if (_utf8_byte_count == 0) {
+            _utf8_state = UTF8_END;
+         }
+      } else {
+         _utf8_byte_count = 0;
+         _utf8_buffer = 0;
+         _utf8_state = UTF8_INVALID;
+      }
+ 
+      return;
+   }
+ }
+/*
 void Adafruit_GFX_Button::initButton(ILI9341_ESP *gfx,
 	int16_t x, int16_t y, uint8_t w, uint8_t h,
 	uint16_t outline, uint16_t fill, uint16_t textcolor,
@@ -1211,5 +1508,5 @@ bool Adafruit_GFX_Button::contains(int16_t x, int16_t y)
 	if ((x < (_x - _w/2)) || (x > (_x + _w/2))) return false;
 	if ((y < (_y - _h/2)) || (y > (_y + _h/2))) return false;
 	return true;
-}
+}*/
 
