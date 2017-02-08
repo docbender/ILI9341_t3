@@ -16,10 +16,11 @@
   MIT license, all text above must be included in any redistribution
  ****************************************************/
 
+#include <FS.h>
 #include "ILI9341_ESP.h"
 
 // At all other speeds, SPI.beginTransaction() will use the fastest available clock
-#define SPICLOCK 40000000  // ESP8266 set SPI clock to 40MHz
+#define SPICLOCK 80000000  // ESP8266 set SPI clock to 40MHz
 
 #define WIDTH  ILI9341_TFTWIDTH
 #define HEIGHT ILI9341_TFTHEIGHT
@@ -52,7 +53,7 @@ void ILI9341_ESP::beginTransaction(void)
 void ILI9341_ESP::setAddrWindow(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1)
 {
 	setAddr(x0, y0, x1, y1);
-	writecommand_last(ILI9341_RAMWR); // write to RAM
+	writecommand_cont(ILI9341_RAMWR); // write to RAM
 }
 
 void ILI9341_ESP::pushColor(uint16_t color)
@@ -106,43 +107,19 @@ void ILI9341_ESP::fillRect(int16_t x, int16_t y, int16_t w, int16_t h, uint16_t 
 	if((x + w - 1) >= _width)  w = _width  - x;
 	if((y + h - 1) >= _height) h = _height - y;
 
-	// TODO: this can result in a very long transaction time
-	// should break this into multiple transactions, even though
-	// it'll cost more overhead, so we don't stall other SPI libs
 	setAddr(x, y, x+w-1, y+h-1);
-	writecommand_cont(ILI9341_RAMWR);
-   if(w*h >= 32)
-      SPI.setDataBits(64*8);   
-   else
-      SPI.setDataBits(w*h*16);   
-  
-   initializedatatransfer();
+	writecommand_cont(ILI9341_RAMWR);  
    
-   uint16_t swapColor = color >> 8 | color << 8;
-   uint32_t words = 32;
-   volatile uint16_t *fifoPtr = (volatile uint16_t*)&SPI1W0;
-   volatile uint16_t *actualPtr = (volatile uint16_t*)&SPI1W0;
-       
-	for(y=h; y>0; y--) {
-		for(x=w; x>0; x--) {
-         *actualPtr = swapColor;
-         actualPtr++;
-         if(--words == 0)
-         {
-            SPI1CMD |= SPIBUSY;
-            words = 32;
-            actualPtr = fifoPtr;                       
-            while(SPI1CMD & SPIBUSY) {}
-            
-            if((y == 1) && x<32)
-            {
-               words = x;
-               SPI.setDataBits(x*16);                           
-            }           
-         }
-      }      
-	}
+   uint32_t pixels = w*h;
 
+   fillPreparedArea(pixels, color);   
+  
+/*   initializedatatransfer();
+   
+   uint8_t swapColor[] = { (uint8_t)color >> 8, (uint8_t)color };
+
+   SPI.writePattern(swapColor,2,pixels);*/
+   
    finishtransfer();
 }
 
@@ -419,14 +396,31 @@ void ILI9341_ESP::readRect(int16_t x, int16_t y, int16_t w, int16_t h, uint16_t 
 // Now lets see if we can writemultiple pixels
 void ILI9341_ESP::writeRect(int16_t x, int16_t y, int16_t w, int16_t h, const uint16_t *pcolors)
 {
-	setAddr(x, y, x+w-1, y+h-1);
-	writecommand_cont(ILI9341_RAMWR);
-	for(y=h; y>0; y--) {
-		for(x=w; x>1; x--) {
-			writedata16_cont(*pcolors++);
-		}
-		writedata16_last(*pcolors++);
-	}
+   setAddrWindow(x,y,x+w-1,y+h-1);
+   
+   initializedatatransfer();
+   
+   uint32_t pixels = w*h, bytes=64;
+   uint8_t buffer[64];
+   uint8_t *data = (uint8_t*)pcolors;
+   
+   while(pixels>0){      
+      if(pixels<32)
+         bytes = pixels<<1;
+      
+      for(int i=0;i<bytes;i+=2)
+      {
+         buffer[i] = data[i+1];
+         buffer[i+1] = data[i];
+      }
+
+      SPI.writePattern(buffer,bytes,1);
+      
+      data+=bytes;
+      pixels-=bytes>>1;
+   }  
+
+   finishtransfer();   
 }
 
 static const uint8_t init_commands[] = {
@@ -443,6 +437,7 @@ static const uint8_t init_commands[] = {
 	2, ILI9341_VMCTR2, 0x86, // VCM control2
 	2, ILI9341_MADCTL, 0x48, // Memory Access Control
 	2, ILI9341_PIXFMT, 0x55,
+//   2, ILI9341_WRCTRLD, 0x28,
 	3, ILI9341_FRMCTR1, 0x00, 0x18,
 	4, ILI9341_DFUNCTR, 0x08, 0x82, 0x27, // Display Function Control
 	2, 0xF2, 0x00, // Gamma Function Disable
@@ -857,21 +852,6 @@ void ILI9341_ESP::fillTriangle ( int16_t x0, int16_t y0,
   }
 }
 
-void ILI9341_ESP::drawBitmap(int16_t x, int16_t y,
-			      const uint8_t *bitmap, int16_t w, int16_t h,
-			      uint16_t color) {
-
-  int16_t i, j, byteWidth = (w + 7) / 8;
-
-  for(j=0; j<h; j++) {
-    for(i=0; i<w; i++ ) {
-      if(pgm_read_byte(bitmap + j * byteWidth + i / 8) & (128 >> (i & 7))) {
-	drawPixel(x+i, y+j, color);
-      }
-    }
-  }
-}
-
 //clear previously printed text(print with backgroud color)
 void ILI9341_ESP::sprintc(label &object){
    setFont(*object.font);   
@@ -1094,6 +1074,7 @@ static uint32_t fetchbits_signed(const uint8_t *p, uint32_t index, uint32_t requ
 	}
 	return (int32_t)val;
 }
+
 void ILI9341_ESP::drawFontChar(unsigned int c)
 {
 	uint32_t bitoffset;
@@ -1260,7 +1241,7 @@ size_t ILI9341_ESP::strPixelLen(const char * str)
 				uint32_t delta = fetchbits_unsigned(data, bitoffset, font->bits_delta);
 				bitoffset += font->bits_delta;
 
-				len += delta;//+width-xoffset;
+				len += delta;
 				if ( len > maxlen )
 				{
 					maxlen=len;
@@ -1463,6 +1444,73 @@ void ILI9341_ESP::nextUTF8State(const uint8_t c) {
       return;
    }
  }
+ 
+int32_t ILI9341_ESP::drawRawBmp565(int16_t x, int16_t y, int16_t w, int16_t h,
+	char* path) {
+   if(!SPIFFS.begin())
+   {
+      // debug.println("Cannot open FS");
+      return 1;
+   }
+   
+   FSInfo fs_info;
+   SPIFFS.info(fs_info);   
+   // debug.println("FS info:");
+   // debug.print("   Total/Used:");
+   // debug.print(fs_info.totalBytes);debug.print("B/");
+   // debug.print(fs_info.usedBytes);debug.println("B");
+   
+   File f = SPIFFS.open(path, "r");
+   if(!f)
+   {
+      // debug.println("Cannot open file temp.rgb565");
+      return 2;
+   }
+   
+   int32_t size = f.size();
+  
+   setAddrWindow(x,y,x+w-1,y+h-1);
+   
+   initializedatatransfer();
+   
+   uint8_t buffer[64];
+   uint8_t bytes = 64;
+   
+   
+   while(size>0){      
+      if(size>=64)
+         f.read(buffer,bytes);
+      else{
+         bytes = size;
+         f.read(buffer,bytes);
+      }
+      size-=bytes;  
+
+      uint16_t* p = (uint16_t*)buffer;
+      for(int i=0;i<32;i++)         
+      {
+         uint16_t s = (*p >> 8) | ((*p << 8) & 0xFF00);
+         *p = s;
+         p++;         
+      }
+      
+      SPI.writePattern(buffer,bytes,1);
+   }
+   
+   finishtransfer();
+   
+   f.close();
+   SPIFFS.end();
+   
+   return 0;
+}
+
+// set display brightness (0-255) - LED controller is not be implemented on every display
+void ILI9341_ESP::setBrightness(uint8_t brightness)
+{
+   writecommand_cont(ILI9341_WRDISBV);
+   writedata8_last(brightness);
+}
 /*
 void Adafruit_GFX_Button::initButton(ILI9341_ESP *gfx,
 	int16_t x, int16_t y, uint8_t w, uint8_t h,
@@ -1497,7 +1545,7 @@ void Adafruit_GFX_Button::drawButton(bool inverted)
 	}
 	_gfx->fillRoundRect(_x - (_w/2), _y - (_h/2), _w, _h, min(_w,_h)/4, fill);
 	_gfx->drawRoundRect(_x - (_w/2), _y - (_h/2), _w, _h, min(_w,_h)/4, outline);
-	_gfx->setCursor(_x - strlen(_label)*3*_textsize, _y-4*_textsize);
+	_0gfx->setCursor(_x - strlen(_label)*3*_textsize, _y-4*_textsize);
 	_gfx->setTextColor(text);
 	_gfx->setTextSize(_textsize);
 	_gfx->print(_label);

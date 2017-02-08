@@ -61,6 +61,13 @@ MIT license, all text above must be included in any redistribution
 #define ILI9341_VSCRSADD 0x37
 #define ILI9341_PIXFMT   0x3A
 
+#define ILI9341_WRDISBV  0x51
+#define ILI9341_RDDISBV  0x52
+#define ILI9341_WRCTRLD  0x53
+#define ILI9341_RDCTRLD  0x54
+#define ILI9341_WRCABC   0x55
+#define ILI9341_RDCABC   0x56
+
 #define ILI9341_FRMCTR1 0xB1
 #define ILI9341_FRMCTR2 0xB2
 #define ILI9341_FRMCTR3 0xB3
@@ -219,7 +226,6 @@ public:
    void fillTriangle(int16_t x0, int16_t y0, int16_t x1, int16_t y1, int16_t x2, int16_t y2, uint16_t color);
    void drawRoundRect(int16_t x0, int16_t y0, int16_t w, int16_t h, int16_t radius, uint16_t color);
    void fillRoundRect(int16_t x0, int16_t y0, int16_t w, int16_t h, int16_t radius, uint16_t color);
-   void drawBitmap(int16_t x, int16_t y, const uint8_t *bitmap, int16_t w, int16_t h, uint16_t color);
    void drawChar(int16_t x, int16_t y, unsigned char c, uint16_t color, uint16_t bg, uint8_t size);
    void setCursor(int32_t x, int32_t y);
    void getCursor(int32_t *x, int32_t *y);  
@@ -241,12 +247,16 @@ public:
    void setFontAdafruit(void) { font = NULL; }
    void drawFontChar(unsigned int c);
    size_t strPixelLen(const char * str);
-   //clear sprint
+   // clear sprint
    void sprintc(label &object);
-   //save sprint with prepared object(string is in text property)
+   // save sprint with prepared object(string is in text property)
    void sprints(label &object);
-   //clear and save sprint with c_string
+   // clear and save sprint with c_string
    void sprintcs(label &object, const char *s);
+   // draw raw 565 bitmap stored in Flash filesystem
+   int32_t drawRawBmp565(int16_t x, int16_t y, int16_t w, int16_t h,	char* path);
+   // set display brightness (0-255) - LED controller is not be implemented on every display
+   void setBrightness(uint8_t brightness);   
 
 
 protected:
@@ -270,89 +280,57 @@ protected:
    UTF8_STATE _utf8_state;
    uint8_t _utf8_byte_count;   
 
-   void waittransfercompleted()__attribute__((always_inline))
+/*   void waittransfercompleted()__attribute__((always_inline))
    {
       while(SPI1CMD & SPIBUSY) {}
-   }    
+   }*/    
    
    void initializedatatransfer(void)__attribute__((always_inline))
    {
-      waittransfercompleted();
+      //waittransfercompleted();
       
       digitalWrite(_dc, HIGH);
-      digitalWrite(_cs, LOW);
+      //digitalWrite(_cs, LOW);
    }  
    
-   void startbuffertransfer(uint16_t bytescount)__attribute__((always_inline))
+ /*  void startbuffertransfer(uint16_t bytescount)__attribute__((always_inline))
    {
       SPI.setDataBits(bytescount*8);
       SPI1CMD |= SPIBUSY;
-   }     
+   } */    
 
    void finishtransfer(void)__attribute__((always_inline))
    {
-      waittransfercompleted();
+      //waittransfercompleted();
       digitalWrite(_cs, HIGH);
    }    
-   
-   volatile uint8_t* writeinSPIbuffer(volatile uint8_t *buffer, uint8_t data) __attribute__((always_inline))
-   {
-      *buffer = data;
-      buffer++;
-      
-      return buffer;
-   }    
-   
-   volatile uint16_t* writeinSPIbuffer(volatile uint16_t *buffer, uint16_t data) __attribute__((always_inline))
-   {
-      *buffer = data >> 8 | data << 8;
-      buffer++;
-      
-      return buffer;
-   }    
-
-   /*	void setAddr(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1)
-   __attribute__((always_inline)) {
-      writecommand_cont(ILI9341_CASET); // Column addr set
-      //writedata16_cont(x0);   // XSTART
-
-      initializedatatransfer();
-      SPI.setDataBits(4*8);
-      
-      volatile uint16_t *buffer = (volatile uint16_t*)&SPI1W0;
-      // XSTART
-      buffer = writeinSPIbuffer(buffer,x0);
-      buffer = writeinSPIbuffer(buffer,x1);
-
-      SPI1CMD |= SPIBUSY;
-      while(SPI1CMD & SPIBUSY) {}
-//      writedata16_cont(x1);   // XEND
-      writecommand_cont(ILI9341_PASET); // Row addr set
-      buffer = (volatile uint16_t*)&SPI1W0;
-      initializedatatransfer();
-      SPI.setDataBits(4*8);
-      buffer = writeinSPIbuffer(buffer,y0);
-      buffer = writeinSPIbuffer(buffer,y1);
-      SPI.setDataBits(4*8);
-      SPI1CMD |= SPIBUSY;
-
-      finishtransfer();      
-   }*/
-   
+    
    void setAddr(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1)
    __attribute__((always_inline)) {
-      writecommand_cont(ILI9341_CASET); // Column addr set
-      writedata16_cont(x0);   // XSTART
-      writedata16_cont(x1);   // XEND
-      writecommand_cont(ILI9341_PASET); // Row addr set
-      writedata16_cont(y0);   // YSTART
-      writedata16_cont(y1);   // YEND
-   }
-   
+      // Column addr set
+      digitalWrite(_dc, LOW);
+      digitalWrite(_cs, LOW);
+      SPI.write(ILI9341_CASET);
+      // X 
+      digitalWrite(_dc, HIGH);      
+      uint8_t buffer[] = { (uint8_t) (x0 >> 8), (uint8_t) x0, (uint8_t) (x1 >> 8), (uint8_t) x1 };
+      SPI.writeBytes(buffer, 4);
+      // Row addr set
+      digitalWrite(_dc, LOW);
+      SPI.write(ILI9341_PASET);
+      // Y 
+      digitalWrite(_dc, HIGH);      
+      buffer[0] = (uint8_t) (y0 >> 8);
+      buffer[1] = (uint8_t) y0; 
+      buffer[2] = (uint8_t) (y1 >> 8);
+      buffer[3] = (uint8_t) y1;
+      SPI.writeBytes(buffer, 4);
+      //digitalWrite(_cs, HIGH);
+   }   
    
    //write command
    void writecommand_cont(uint8_t c) __attribute__((always_inline)) {
-      waittransfercompleted();     
+      //waittransfercompleted();     
       
       digitalWrite(_dc, LOW);
       digitalWrite(_cs, LOW);
@@ -362,20 +340,20 @@ protected:
    
    //write data byte
    void writedata8_cont(uint8_t c) __attribute__((always_inline)) {
-      waittransfercompleted();
+      //waittransfercompleted();
       
       digitalWrite(_dc, HIGH);
-      digitalWrite(_cs, LOW);      
+      //digitalWrite(_cs, LOW);      
       
       SPI.write(c);
    }
    
    //write data word
    void writedata16_cont(uint16_t d) __attribute__((always_inline)) {
-      waittransfercompleted();
+      //waittransfercompleted();
       
       digitalWrite(_dc, HIGH);
-      digitalWrite(_cs, LOW);      
+      //digitalWrite(_cs, LOW);      
       
       SPI.write16(d);
    }
@@ -397,6 +375,12 @@ protected:
    }
    
    void fillPreparedArea(uint32_t length, uint16_t color) __attribute__((always_inline)) {   
+      initializedatatransfer();
+      uint32_t pixels = length;
+      uint8_t swapColor[] = { (uint8_t)(color >> 8), (uint8_t)color };
+      SPI.writePattern(swapColor,2,pixels);      
+  
+  /*
       volatile uint16_t *fifoPtr = (volatile uint16_t*)&SPI1W0;
       volatile uint16_t *actualPtr = (volatile uint16_t*)&SPI1W0;
       uint32_t words; //SPI FIFO has 64 bytes 
@@ -433,20 +417,20 @@ protected:
                SPI.setDataBits(length*16);
             }           
          }              
-      } 
+      }*/
    }
    
    void HLine(int16_t x, int16_t y, int16_t w, uint16_t color)
    __attribute__((always_inline)) {
       setAddr(x, y, x+w-1, y);
       writecommand_cont(ILI9341_RAMWR);      
-      fillPreparedArea(w, color);
+      fillPreparedArea((uint32_t)w, color);
    }
    void VLine(int16_t x, int16_t y, int16_t h, uint16_t color)
    __attribute__((always_inline)) {
       setAddr(x, y, x, y+h-1);
       writecommand_cont(ILI9341_RAMWR);
-      fillPreparedArea(h, color);
+      fillPreparedArea((uint32_t)h, color);
    }
    void Pixel(int16_t x, int16_t y, uint16_t color)
    __attribute__((always_inline)) {

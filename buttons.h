@@ -21,20 +21,49 @@ public:
    void (*OnClick)();   
    // check if coordinates inside graphic
    bool ContainsCursor(uint32_t x, uint32_t y);
-
+   // force redraw
+   void ForceRedraw(void) { redraw = true; };
+   // visible set
+   void SetVisible(bool isVisible) { visible = isVisible; };
+   // visible get
+   bool GetVisible(void) { return visible; };
+   // long press enable for reapeat onclick
+   void EnableLongPress(bool enable) { longPressEnabled = enable; };   
+   // long press enable for secondary action
+   void EnableLongPress(bool enable, void secondaryAction()) { longPressEnabled = enable; secondAction = secondaryAction; };   
+   // check if press is last long
+   void LongPressProcess(void);
+   
 protected:
    bool redraw;
    bool clicked;
    bool pressed;
+   bool visible;
+   bool longPressEnabled;
+   uint32_t pressTime,repeatTime;
+   bool repeatAction;
+   void (*secondAction)();
 };
 
-class BitmapButton : BaseButton
+class ImageButton : public BaseButton
 {
 public:
-   BitmapButton(uint32_t x, uint32_t y);
-
+   ImageButton(uint32_t x, uint32_t y, uint32_t width, uint32_t height)
+      : BaseButton(x, y, width, height),image(NULL),path(NULL){  };
+      
+   ImageButton(uint32_t x, uint32_t y, uint32_t width, uint32_t height, const uint16_t *imageData)
+      : BaseButton(x, y, width, height),image(imageData),path(NULL){  };
+      
+   ImageButton(uint32_t x, uint32_t y, uint32_t width, uint32_t height, char *imagePath)
+      : BaseButton(x, y, width, height),image(NULL),path(imagePath){  };      
+   
+   // draw graphics
+   void Draw(ILI9341_ESP &renderer); 
+   void SetImage(const uint16_t *imageData) { image = imageData; redraw = true; };
+   void SetImage(char *imagePath) { path = imagePath; redraw = true; };
 protected:
-  
+   const uint16_t *image;  
+   char *path;  
 };
 
 class TextButton : public BaseButton

@@ -14,27 +14,57 @@
  ****************************************************/
 
 
+#include <ESP8266WiFi.h>
+#include <ArduinoOTA.h> 
 #include "SPI.h"
-#include "ILI9341_t3.h"
+#include "ILI9341_ESP.h"
+#include "Arduino.h"
 
-// For the Adafruit shield, these are the default.
-#define TFT_DC  9
-#define TFT_CS 10
+#define WIFI_SSID "WLAN"
+#define WIFI_PWD  "heslonawifi"
+#define OTA_HOST "ILI-ESP"
+#define OTA_PASS "xxxxx"
 
-// Use hardware SPI (on Uno, #13, #12, #11) and the above for CS/DC
-ILI9341_t3 tft = ILI9341_t3(TFT_CS, TFT_DC);
+#define LCD_DC  4
+#define LCD_CS  5
+
+ILI9341_ESP tft = ILI9341_ESP(LCD_CS, LCD_DC);			// ESP: create LCD object
+
+void WiFiEvent(WiFiEvent_t event) {
+
+}
 
 void setup() {
+// delete old config
+  WiFi.disconnect(true);
+  delay(1000);
+   
+  WiFi.onEvent(WiFiEvent);
+
+  WiFi.begin(WIFI_SSID, WIFI_PWD);
+
+  ArduinoOTA.setHostname(OTA_HOST);
+  ArduinoOTA.setPassword(OTA_PASS);
+  ArduinoOTA.onStart([]() {
+
+  });
+
+  ArduinoOTA.onEnd([]() { 
+  });
+
+  ArduinoOTA.onError([](ota_error_t error) { ESP.restart(); });
+  /* setup the OTA server */
+  ArduinoOTA.begin(); 
+   
   tft.begin();
   tft.fillScreen(ILI9341_BLACK);
   tft.setTextColor(ILI9341_YELLOW);
   tft.setTextSize(2);
   tft.println("Waiting for Arduino Serial Monitor...");
 
-  Serial.begin(9600);
+  Serial.begin(115200);
   while (!Serial) ; // wait for Arduino Serial Monitor
   Serial.println("ILI9341 Test!"); 
-
   // read diagnostics (optional but can help debug problems)
   uint8_t x = tft.readcommand8(ILI9341_RDMODE);
   Serial.print("Display Power Mode: 0x"); Serial.println(x, HEX);
@@ -45,68 +75,181 @@ void setup() {
   x = tft.readcommand8(ILI9341_RDIMGFMT);
   Serial.print("Image Format: 0x"); Serial.println(x, HEX);
   x = tft.readcommand8(ILI9341_RDSELFDIAG);
-  Serial.print("Self Diagnostic: 0x"); Serial.println(x, HEX); 
+  Serial.print("Self Diagnostic: 0x"); Serial.println(x, HEX);  
   
-  Serial.println(F("Benchmark                Time (microseconds)"));
-
-  Serial.print(F("Screen fill              "));
-  Serial.println(testFillScreen());
-  delay(200);
-
-  Serial.print(F("Text                     "));
-  Serial.println(testText());
-  delay(600);
-
-  Serial.print(F("Lines                    "));
-  Serial.println(testLines(ILI9341_CYAN));
-  delay(200);
-
-  Serial.print(F("Horiz/Vert Lines         "));
-  Serial.println(testFastLines(ILI9341_RED, ILI9341_BLUE));
-  delay(200);
-
-  Serial.print(F("Rectangles (outline)     "));
-  Serial.println(testRects(ILI9341_GREEN));
-  delay(200);
-
-  Serial.print(F("Rectangles (filled)      "));
-  Serial.println(testFilledRects(ILI9341_YELLOW, ILI9341_MAGENTA));
-  delay(200);
-
-  Serial.print(F("Circles (filled)         "));
-  Serial.println(testFilledCircles(10, ILI9341_MAGENTA));
-
-  Serial.print(F("Circles (outline)        "));
-  Serial.println(testCircles(10, ILI9341_WHITE));
-  delay(200);
-
-  Serial.print(F("Triangles (outline)      "));
-  Serial.println(testTriangles());
-  delay(200);
-
-  Serial.print(F("Triangles (filled)       "));
-  Serial.println(testFilledTriangles());
-  delay(200);
-
-  Serial.print(F("Rounded rects (outline)  "));
-  Serial.println(testRoundRects());
-  delay(200);
-
-  Serial.print(F("Rounded rects (filled)   "));
-  Serial.println(testFilledRoundRects());
-  delay(200);
-
-  Serial.println(F("Done!"));
-
 }
 
+uint32_t testId = 0, finishTime;
+uint32_t tFill,tText,tLines,tHVLines,tCircF,tRectO,tRectF,tCircO,tTriO,tTriF,tRRectO,tRRectF;
 
 void loop(void) {
+  ArduinoOTA.handle();
+  
+  if(testId<13)
+    runTest(testId++);
+  else if(testId++==13){
+     printResults();
+     finishTime = millis();
+  }else{
+     if(millis()-finishTime>60000)
+       testId=0;
+  }
+  
+/*  
   for(uint8_t rotation=0; rotation<4; rotation++) {
     tft.setRotation(rotation);
     testText();
     delay(1000);
   }
+*/  
+}
+
+void runTest(uint32_t testId){
+   if(testId==0){
+      Serial.println(F("Benchmark                Time (microseconds)"));
+     
+      Serial.print(F("Screen fill              "));
+      tFill = testFillScreen();
+      Serial.println(tFill);
+      delay(20);
+      return;
+   }
+
+   if(testId==1){
+      Serial.print(F("Text                     "));
+      tText = testText();
+      Serial.println(tText);
+      delay(20);
+      return;
+   }  
+
+   if(testId==2){  
+      Serial.print(F("Lines                    "));
+      tLines = testLines(ILI9341_CYAN);
+      Serial.println(tLines);
+      delay(20);
+      return;
+   }  
+
+   if(testId==3){  
+      Serial.print(F("Horiz/Vert Lines         "));
+      tHVLines = testFastLines(ILI9341_RED, ILI9341_BLUE);
+      Serial.println(tHVLines);
+      delay(20);
+      return;
+   }  
+
+   if(testId==4){  
+      Serial.print(F("Rectangles (outline)     "));
+      tRectO = testRects(ILI9341_GREEN);
+      Serial.println(tRectO);
+      delay(20);
+      return;
+   }  
+
+   if(testId==5){
+      Serial.print(F("Rectangles (filled)      "));
+      tRectF = testFilledRects(ILI9341_YELLOW, ILI9341_MAGENTA);
+      Serial.println(tRectF);
+      delay(20);
+      return;
+   }  
+
+   if(testId==6){
+      Serial.print(F("Circles (filled)         "));
+      tCircF = testFilledCircles(10, ILI9341_MAGENTA);
+      Serial.println(tCircF);
+      delay(20);
+      return;
+   }  
+
+   if(testId==7){  
+      Serial.print(F("Circles (outline)        "));
+      tCircO = testCircles(10, ILI9341_WHITE);
+      Serial.println(tCircO);
+      delay(20);
+      return;
+   }  
+
+   if(testId==8){
+      Serial.print(F("Triangles (outline)      "));
+      tTriO = testTriangles();
+      Serial.println(tTriO);
+      delay(20);
+      return;
+   }  
+
+   if(testId==9){  
+      Serial.print(F("Triangles (filled)       "));
+      tTriF = testFilledTriangles();
+      Serial.println(tTriF);
+      delay(20);
+      return;
+   }  
+
+   if(testId==10){  
+      Serial.print(F("Rounded rects (outline)  "));
+      tRRectO = testRoundRects();
+      Serial.println(tRRectO);
+      delay(20);
+      return;
+   }      
+
+   if(testId==11){  
+      Serial.print(F("Rounded rects (filled)   "));
+      tRRectF = testFilledRoundRects();
+      Serial.println(tRRectF);
+      delay(20);
+      return;
+   }      
+
+   if(testId==12){  
+      Serial.println(F("Done!"));   
+      return;
+   }
+}
+
+void printResults(){
+   tft.fillScreen(ILI9341_BLACK);
+   tft.setTextColor(ILI9341_WHITE);  tft.setTextSize(1);
+   tft.setCursor(0, 50);
+  
+   tft.println(F("Benchmark                Time (us)"));     
+   tft.print(F("Screen fill              "));
+   tft.println(tFill);
+
+   tft.print(F("Text                     "));
+   tft.println(tText);
+
+   tft.print(F("Lines                    "));
+   tft.println(tLines);
+
+   tft.print(F("Horiz/Vert Lines         "));
+   tft.println(tHVLines); 
+
+   tft.print(F("Rectangles (outline)     "));
+   tft.println(tRectO);
+
+   tft.print(F("Rectangles (filled)      "));
+   tft.println(tRectF);
+
+   tft.print(F("Circles (filled)         "));
+   tft.println(tCircF);
+
+   tft.print(F("Circles (outline)        "));
+   tft.println(tCircO); 
+
+   tft.print(F("Triangles (outline)      "));
+   tft.println(tTriO);
+
+   tft.print(F("Triangles (filled)       "));
+   tft.println(tTriF);
+
+   tft.print(F("Rounded rects (outline)  "));
+   tft.println(tRRectO);     
+
+   tft.print(F("Rounded rects (filled)   "));
+   tft.println(tRRectF);
 }
 
 unsigned long testFillScreen() {
@@ -146,8 +289,8 @@ unsigned long testText() {
   return micros() - start;
 }
 
-unsigned long testLines(uint16_t color) {
-  unsigned long start, t;
+uint32_t testLines(uint16_t color) {
+  uint32_t start, t;
   int           x1, y1, x2, y2,
                 w = tft.width(),
                 h = tft.height();
@@ -162,6 +305,9 @@ unsigned long testLines(uint16_t color) {
   for(y2=0; y2<h; y2+=6) tft.drawLine(x1, y1, x2, y2, color);
   t     = micros() - start; // fillScreen doesn't count against timing
 
+  if(t>1000000)
+     delay(1);  
+  
   tft.fillScreen(ILI9341_BLACK);
 
   x1    = w - 1;
@@ -173,6 +319,9 @@ unsigned long testLines(uint16_t color) {
   for(y2=0; y2<h; y2+=6) tft.drawLine(x1, y1, x2, y2, color);
   t    += micros() - start;
 
+  if(t>1000000)
+     delay(1);
+  
   tft.fillScreen(ILI9341_BLACK);
 
   x1    = 0;
@@ -185,6 +334,9 @@ unsigned long testLines(uint16_t color) {
   t    += micros() - start;
 
   tft.fillScreen(ILI9341_BLACK);
+  
+  if(t>1000000)
+     delay(1);  
 
   x1    = w - 1;
   y1    = h - 1;
@@ -194,7 +346,7 @@ unsigned long testLines(uint16_t color) {
   x2    = 0;
   for(y2=0; y2<h; y2+=6) tft.drawLine(x1, y1, x2, y2, color);
 
-  return micros() - start;
+  return t + micros() - start;
 }
 
 unsigned long testFastLines(uint16_t color1, uint16_t color2) {

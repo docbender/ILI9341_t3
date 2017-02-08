@@ -10,7 +10,7 @@
 
 #include <ILI9341_ESP.h>
 
-#define RECORD_LENGTH 50
+#define RECORD_LENGTH 64
 
 class DebugPrint : public Print
 {
