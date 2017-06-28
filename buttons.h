@@ -33,12 +33,17 @@ public:
    void EnableLongPress(bool enable, void secondaryAction()) { longPressEnabled = enable; secondAction = secondaryAction; };   
    // check if press is last long
    void LongPressProcess(void);
+   // grayed button
+   void SetGrayed();   
+   // grayed button
+   void SetGrayed(bool enable);
    
 protected:
    bool redraw;
    bool clicked;
    bool pressed;
    bool visible;
+   bool grayed;
    bool longPressEnabled;
    uint32_t pressTime,repeatTime;
    bool repeatAction;

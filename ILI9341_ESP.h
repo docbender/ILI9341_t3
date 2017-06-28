@@ -142,21 +142,40 @@ typedef struct {
 class label
 {
 public:
+   enum ALIGN_STATE {
+      ALIGN_LEFT,
+      ALIGN_CENTER,
+      ALIGN_RIGHT
+   } align;
+   
    label(uint32_t x, uint32_t y, size_t maxlength, uint16_t backgroundcolor, 
          uint16_t foregroundcolor, const ILI9341_t3_font_t &font )
       : x(x), y(y), maxlength(maxlength), backgroundcolor(backgroundcolor), 
          foregroundcolor(foregroundcolor), font(&font)
-      { text = new char[maxlength];  };
-   
+      { text = new char[maxlength+1];  format = NULL; align = ALIGN_LEFT; };
+   label(uint32_t x, uint32_t y, size_t maxlength, uint16_t backgroundcolor, 
+         uint16_t foregroundcolor, const ILI9341_t3_font_t &font, const ALIGN_STATE align)
+      : x(x), y(y), maxlength(maxlength), backgroundcolor(backgroundcolor), 
+         foregroundcolor(foregroundcolor), font(&font), align(align)
+      { text = new char[maxlength+1];  format = NULL; };      
+   label(uint32_t x, uint32_t y, size_t maxlength, uint16_t backgroundcolor, 
+         uint16_t foregroundcolor, const ILI9341_t3_font_t &font, char* format )
+      : x(x), y(y), maxlength(maxlength), backgroundcolor(backgroundcolor), 
+         foregroundcolor(foregroundcolor), font(&font), format(format)
+      { text = new char[maxlength+1]; align = ALIGN_LEFT; };         
+         
    uint32_t x;
    uint32_t y;
    size_t maxlength;
-   char *text;
+   char *text, *format;
    uint16_t backgroundcolor;
    uint16_t foregroundcolor;
    const ILI9341_t3_font_t *font;
    
+
+   
 protected:
+
    
 };
 
@@ -253,11 +272,16 @@ public:
    void sprints(label &object);
    // clear and save sprint with c_string
    void sprintcs(label &object, const char *s);
+   // draw label
+   void printLabel(label &object, bool force, ...);      
    // draw raw 565 bitmap stored in Flash filesystem
    int32_t drawRawBmp565(int16_t x, int16_t y, int16_t w, int16_t h,	char* path);
+   // draw raw 565 bitmap stored in Flash filesystem
+   int32_t drawRawBmp565BlackWhite(int16_t x, int16_t y, int16_t w, int16_t h,	char* path);   
    // set display brightness (0-255) - LED controller is not be implemented on every display
    void setBrightness(uint8_t brightness);   
-
+   // create printscreen and save it into bitmap
+   void printscreen(int32_t x, int32_t y, int32_t w, int32_t h, const char *fileName);
 
 protected:
    enum UTF8_STATE {
@@ -378,46 +402,7 @@ protected:
       initializedatatransfer();
       uint32_t pixels = length;
       uint8_t swapColor[] = { (uint8_t)(color >> 8), (uint8_t)color };
-      SPI.writePattern(swapColor,2,pixels);      
-  
-  /*
-      volatile uint16_t *fifoPtr = (volatile uint16_t*)&SPI1W0;
-      volatile uint16_t *actualPtr = (volatile uint16_t*)&SPI1W0;
-      uint32_t words; //SPI FIFO has 64 bytes 
-      uint16_t swapColor = color >> 8 | color << 8;
-
-      if(length<32)
-      {
-         SPI.setDataBits(length*16); 
-         words = length;
-      }
-      else
-      {
-         SPI.setDataBits(64*8); 
-         words = 32;
-      }
-      
-      initializedatatransfer();
-      
-      while (length-- > 0)  
-      { 
-         *actualPtr = swapColor;
-         actualPtr++;
-         
-         if(--words == 0)
-         {
-            SPI1CMD |= SPIBUSY;
-            words = 32;
-            actualPtr = fifoPtr;                       
-            while(SPI1CMD & SPIBUSY) {}
-            
-            if(length<32)
-            {
-               words = length;
-               SPI.setDataBits(length*16);
-            }           
-         }              
-      }*/
+      SPI.writePattern(swapColor,2,pixels);
    }
    
    void HLine(int16_t x, int16_t y, int16_t w, uint16_t color)

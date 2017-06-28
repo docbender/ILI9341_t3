@@ -87,6 +87,17 @@ void BaseButton::LongPressProcess(void)
    }   
 }
 
+void BaseButton::SetGrayed(bool enable)
+{
+   grayed = enable;
+   redraw = true;
+}
+
+void BaseButton::SetGrayed()
+{
+   SetGrayed(true);
+}
+
 void BaseButton::Draw(ILI9341_ESP &renderer) 
 { 
    LongPressProcess();
@@ -112,8 +123,12 @@ void ImageButton::Draw(ILI9341_ESP &renderer)
    
    if(image)
       renderer.writeRect(X,Y,Width,Height,image);
-   else if(path)
-      renderer.drawRawBmp565(X,Y,Width,Height,path);
+   else if(path){
+      if(grayed)
+         renderer.drawRawBmp565BlackWhite(X,Y,Width,Height,path);
+      else
+         renderer.drawRawBmp565(X,Y,Width,Height,path);
+   }
    
    uint16_t framecolor = pressed ? CL(127,135,225) : CL(165,165,165);   
    renderer.drawRect(X,Y,Width,Height,framecolor); 

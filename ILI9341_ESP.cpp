@@ -20,10 +20,12 @@
 #include "ILI9341_ESP.h"
 
 // At all other speeds, SPI.beginTransaction() will use the fastest available clock
-#define SPICLOCK 80000000  // ESP8266 set SPI clock to 40MHz
+#define SPICLOCK 80000000  // ESP8266 set SPI clock to 80MHz
 
 #define WIDTH  ILI9341_TFTWIDTH
 #define HEIGHT ILI9341_TFTHEIGHT
+
+#define FONT_IN_FLASH
 
 
 // Constructor when using hardware SPI.  
@@ -113,13 +115,7 @@ void ILI9341_ESP::fillRect(int16_t x, int16_t y, int16_t w, int16_t h, uint16_t 
    uint32_t pixels = w*h;
 
    fillPreparedArea(pixels, color);   
-  
-/*   initializedatatransfer();
-   
-   uint8_t swapColor[] = { (uint8_t)color >> 8, (uint8_t)color };
-
-   SPI.writePattern(swapColor,2,pixels);*/
-   
+    
    finishtransfer();
 }
 
@@ -136,44 +132,14 @@ void ILI9341_ESP::fillRectVGradient(int16_t x, int16_t y, int16_t w, int16_t h, 
 	color565toRGB14(color2,r2,g2,b2);
 	dr=(r2-r1)/h; dg=(g2-g1)/h; db=(b2-b1)/h;
 	r=r1;g=g1;b=b1;	
-   
-   uint32_t words;
-   volatile uint16_t *fifoPtr = (volatile uint16_t*)&SPI1W0;
-   volatile uint16_t *actualPtr = (volatile uint16_t*)&SPI1W0;
-   
-   if(w*h >= 32)
-   {
-      SPI.setDataBits(64*8);
-      words = 32;
-   }
-   else
-   {
-      words = w*h;
-      SPI.setDataBits(words*16);
-   }
-       
+          
 	for(y=h; y>0; y--) {
       uint16_t color = RGB14tocolor565(r,g,b);
-      color = (color >> 8 | color << 8);
+      uint8_t swapColor[] = { (uint8_t)(color >> 8), (uint8_t)color };
       
-		for(x=w; x>0; x--) {
-         *actualPtr = color;
-         actualPtr++;
-         if(--words == 0)
-         {
-            SPI1CMD |= SPIBUSY;
-            words = 32;
-            actualPtr = fifoPtr;                       
-            while(SPI1CMD & SPIBUSY) {}
-            
-            if((y == 1) && x<32)
-            {
-               words = x;
-               SPI.setDataBits(x*16);                           
-            }           
-         }
-      }
-      r+=dr;g+=dg;b+=db;      
+      SPI.writePattern(swapColor,2,w);
+      
+      r+=dr;g+=dg;b+=db;     
 	}
 
    finishtransfer();   
@@ -192,48 +158,16 @@ void ILI9341_ESP::fillRectHGradient(int16_t x, int16_t y, int16_t w, int16_t h, 
 	color565toRGB14(color2,r2,g2,b2);
 	dr=(r2-r1)/h; dg=(g2-g1)/h; db=(b2-b1)/h;
 	r=r1;g=g1;b=b1;
-
-   uint32_t words;
-   volatile uint16_t *fifoPtr = (volatile uint16_t*)&SPI1W0;
-   volatile uint16_t *actualPtr = (volatile uint16_t*)&SPI1W0;
-   
-   if(w*h >= 32)
-   {
-      SPI.setDataBits(64*8);   
-      words = 32;
-   }
-   else
-   {
-      words = w*h;
-      SPI.setDataBits(words*16);   
-   }
   
-   initializedatatransfer();   
+   initializedatatransfer(); 
 
-       
-	for(y=h; y>0; y--) {
-      uint16_t color;      
-		for(x=w; x>0; x--) {
-         color = RGB14tocolor565(r,g,b);
-         r+=dr;g+=dg;b+=db;
-         *actualPtr = (color >> 8 | color << 8);  
-         actualPtr++;
-         if(--words == 0)
-         {
-            SPI1CMD |= SPIBUSY;
-            words = 32;
-            actualPtr = fifoPtr;                       
-            while(SPI1CMD & SPIBUSY) {}
-            
-            if((y == 1) && x<32)
-            {
-               words = x;
-               SPI.setDataBits(x*16);                           
-            }           
-         }
-      }
-		r=r1;g=g1;b=b1;      
-	}
+   for(x=w; x>0; x--) {   
+      uint16_t color = RGB14tocolor565(r,g,b);      
+      
+      VLine(x,y,h,color);
+      
+      r=r1;g=g1;b=b1; 
+   }
 
    finishtransfer();      
 }
@@ -308,30 +242,6 @@ void ILI9341_ESP::invertDisplay(boolean i)
 	writecommand_last(i ? ILI9341_INVON : ILI9341_INVOFF);
 }
 
-/*
-uint8_t ILI9341_ESP::readdata(void)
-{
-  uint8_t r;
-       // Try to work directly with SPI registers...
-       // First wait until output queue is empty
-        uint16_t wTimeout = 0xffff;
-        while (((KINETISK_SPI0.SR) & (15 << 12)) && (--wTimeout)) ; // wait until empty
-        
-//       	KINETISK_SPI0.MCR |= SPI_MCR_CLR_RXF; // discard any received data
-//		KINETISK_SPI0.SR = SPI_SR_TCF;
-        
-        // Transfer a 0 out... 
-        writedata8_cont(0);   
-        
-        // Now wait until completed. 
-        wTimeout = 0xffff;
-        while (((KINETISK_SPI0.SR) & (15 << 12)) && (--wTimeout)) ; // wait until empty
-        r = KINETISK_SPI0.POPR;  // get the received byte... should check for it first...
-    return r;
-}
- */
-
-
 uint8_t ILI9341_ESP::readcommand8(uint8_t c, uint8_t index)
 {
    SPI.transfer(c);
@@ -350,7 +260,7 @@ uint8_t ILI9341_ESP::readcommand8(uint8_t c, uint8_t index)
    uint8_t r = SPI.transfer(0x0);
    digitalWrite(_cs, HIGH);
   
-    return r;  // get the received byte... should check for it first...
+   return r;  // get the received byte... should check for it first...
 }
 
 
@@ -377,14 +287,13 @@ void ILI9341_ESP::readRect(int16_t x, int16_t y, int16_t w, int16_t h, uint16_t 
 {
 	uint8_t dummy __attribute__((unused));
 	uint8_t r,g,b;
-	uint16_t c = w * h;
+	uint32_t c = w * h;
 
 	setAddr(x, y, x+w-1, y+h-1);
 	writecommand_cont(ILI9341_RAMRD); // read from RAM
 	
    dummy = SPI.transfer(0);	// Read a DUMMY byte but only once
 	
-	c *= 3; // number of bytes we will transmit to the display
 	while (c--) {
 			r = SPI.transfer(0);		// Read a RED byte of GRAM
 			g = SPI.transfer(0);		// Read a GREEN byte of GRAM
@@ -641,7 +550,6 @@ void ILI9341_ESP::fillCircleHelper(int16_t x0, int16_t y0, int16_t r,
   }
 }
 
-
 // Bresenham's algorithm - thx wikpedia
 void ILI9341_ESP::drawLine(int16_t x0, int16_t y0,
 	int16_t x1, int16_t y1, uint16_t color)
@@ -856,7 +764,12 @@ void ILI9341_ESP::fillTriangle ( int16_t x0, int16_t y0,
 void ILI9341_ESP::sprintc(label &object){
    setFont(*object.font);   
    //location
-   setCursor(object.x, object.y);
+   if(object.align == label::ALIGN_RIGHT)      
+      setCursor(object.x - strPixelLen(object.text), object.y);
+   else if(object.align == label::ALIGN_CENTER)
+      setCursor(object.x + (strPixelLen("0")*object.maxlength - strPixelLen(object.text))/2, object.y);
+   else
+      setCursor(object.x, object.y);
    //set background color to clear printed text
    setTextColor(object.backgroundcolor);
    //print last text
@@ -867,7 +780,12 @@ void ILI9341_ESP::sprintc(label &object){
 void ILI9341_ESP::sprints(label &object){
    setFont(*object.font);
    //print new text over same location
-   setCursor(object.x, object.y);
+   if(object.align == label::ALIGN_RIGHT)      
+      setCursor(object.x - strPixelLen(object.text), object.y);
+   else if(object.align == label::ALIGN_CENTER)
+      setCursor(object.x + (strPixelLen("0")*object.maxlength - strPixelLen(object.text))/2, object.y);
+   else
+      setCursor(object.x, object.y);
    setTextColor(object.foregroundcolor);
    print(object.text);
 }
@@ -878,8 +796,8 @@ void ILI9341_ESP::sprintcs(label &object, const char *s){
    
    size_t size = strlen(s);
    //size restriction
-   if(size >= object.maxlength)
-      size = object.maxlength-1;
+   if(size >= object.maxlength+1)
+      size = object.maxlength;
 
    memcpy(object.text,s,size);
    object.text[size] = 0;
@@ -887,6 +805,26 @@ void ILI9341_ESP::sprintcs(label &object, const char *s){
    sprints(object);
 }
 
+// draw label
+void ILI9341_ESP::printLabel(label &object, bool force, ...){
+   if(object.format==NULL)
+      return;  
+
+   char str[object.maxlength+1]; 
+   va_list pValues;
+   va_start(pValues, force);     
+   vsnprintf(str,object.maxlength+1,object.format,pValues);
+   va_end(pValues);
+   
+   if(!force && !strcmp(str,object.text))
+      return;
+    
+   sprintc(object);
+   strcpy(object.text,str);
+   sprints(object);
+}
+
+//
 size_t ILI9341_ESP::write(uint8_t c)
 {
 	if (font) {
@@ -1041,15 +979,23 @@ void ILI9341_ESP::drawChar(int16_t x, int16_t y, unsigned char c,
 
 static uint32_t fetchbit(const uint8_t *p, uint32_t index)
 {
-	if (p[index >> 3] & (1 << (7 - (index & 7)))) return 1;
-      return 0;
+#ifdef FONT_IN_FLASH   
+   if (pgm_read_byte(p+(index >> 3)) & (1 << (7 - (index & 7)))) return 1;
+#else
+	if (p[index >> 3] & (1 << (7 - (index & 7)))) return 1;      
+#endif
+   return 0;
 }
 
 static uint32_t fetchbits_unsigned(const uint8_t *p, uint32_t index, uint32_t required)
 {
 	uint32_t val = 0;
 	do {
+#ifdef FONT_IN_FLASH   
+      uint8_t b = pgm_read_byte(p+(index >> 3));
+#else      
 		uint8_t b = p[index >> 3];
+#endif   
 		uint32_t avail = 8 - (index & 7);
 		if (avail <= required) {
 			val <<= avail;
@@ -1210,19 +1156,19 @@ size_t ILI9341_ESP::strPixelLen(const char * str)
 				const uint8_t *data;
 				uint16_t c = *str;
 
-				if (c >= font->index1_first && c <= font->index1_last) {
-					bitoffset = c - font->index1_first;
-					bitoffset *= font->bits_index;
-				} else if (c >= font->index2_first && c <= font->index2_last) {
-					bitoffset = c - font->index2_first + font->index1_last - font->index1_first + 1;
-					bitoffset *= font->bits_index;
-				} else if (font->unicode) {
+            if (font->unicode) {
                uint16_t table_length = (font->index1_first << 8) | font->index1_last;
                uint32_t index = binarySearch(reinterpret_cast<const uint8_t*>(font->unicode), table_length, c);
                if (index == 0xffff) {
                   index = 0;
                }
                bitoffset = index * font->bits_index;
+            } else if (c >= font->index1_first && c <= font->index1_last) {
+					bitoffset = c - font->index1_first;
+					bitoffset *= font->bits_index;
+				} else if (c >= font->index2_first && c <= font->index2_last) {
+					bitoffset = c - font->index2_first + font->index1_last - font->index1_first + 1;
+					bitoffset *= font->bits_index;
 				} else {
 					continue;
 				}
@@ -1447,23 +1393,15 @@ void ILI9341_ESP::nextUTF8State(const uint8_t c) {
  
 int32_t ILI9341_ESP::drawRawBmp565(int16_t x, int16_t y, int16_t w, int16_t h,
 	char* path) {
-   if(!SPIFFS.begin())
-   {
-      // debug.println("Cannot open FS");
+   if(!SPIFFS.begin()) {
       return 1;
    }
-   
+  
    FSInfo fs_info;
    SPIFFS.info(fs_info);   
-   // debug.println("FS info:");
-   // debug.print("   Total/Used:");
-   // debug.print(fs_info.totalBytes);debug.print("B/");
-   // debug.print(fs_info.usedBytes);debug.println("B");
-   
+
    File f = SPIFFS.open(path, "r");
-   if(!f)
-   {
-      // debug.println("Cannot open file temp.rgb565");
+   if(!f) {
       return 2;
    }
    
@@ -1475,7 +1413,6 @@ int32_t ILI9341_ESP::drawRawBmp565(int16_t x, int16_t y, int16_t w, int16_t h,
    
    uint8_t buffer[64];
    uint8_t bytes = 64;
-   
    
    while(size>0){      
       if(size>=64)
@@ -1505,56 +1442,151 @@ int32_t ILI9341_ESP::drawRawBmp565(int16_t x, int16_t y, int16_t w, int16_t h,
    return 0;
 }
 
+int32_t ILI9341_ESP::drawRawBmp565BlackWhite(int16_t x, int16_t y, int16_t w, int16_t h,
+	char* path) {
+   if(!SPIFFS.begin())
+      return 1;
+      
+   FSInfo fs_info;
+   SPIFFS.info(fs_info);   
+   
+   File f = SPIFFS.open(path, "r");
+   if(!f)
+      return 2;
+   
+   int32_t size = f.size();
+  
+   setAddrWindow(x,y,x+w-1,y+h-1);
+   
+   initializedatatransfer();
+   
+   uint8_t buffer[64];
+   uint8_t bytes = 64;
+   uint8_t r,g,b;
+   uint16_t s;
+   
+   while(size>0){      
+      if(size>=64)
+         f.read(buffer,bytes);
+      else{
+         bytes = size;
+         f.read(buffer,bytes);
+      }
+      size-=bytes;  
+
+      uint16_t* p = (uint16_t*)buffer;
+      for(int i=0;i<32;i++)         
+      {
+         r = (*p>>8)&0x00F8;
+         g = (*p>>3)&0x00FC;
+         b = (*p<<3)&0x00F8;
+         g = (r+g+b)/3;
+         s = color565(g,g,g);
+         s = (s >> 8) | ((s << 8) & 0xFF00);
+         *p = s;
+         p++;         
+      }
+      
+      SPI.writePattern(buffer,bytes,1);
+   }
+   
+   finishtransfer();
+   
+   f.close();
+   SPIFFS.end();
+   
+   return 0;
+}
+
 // set display brightness (0-255) - LED controller is not be implemented on every display
 void ILI9341_ESP::setBrightness(uint8_t brightness)
 {
    writecommand_cont(ILI9341_WRDISBV);
    writedata8_last(brightness);
 }
-/*
-void Adafruit_GFX_Button::initButton(ILI9341_ESP *gfx,
-	int16_t x, int16_t y, uint8_t w, uint8_t h,
-	uint16_t outline, uint16_t fill, uint16_t textcolor,
-	const char *label, uint8_t textsize)
-{
-	_x = x;
-	_y = y;
-	_w = w;
-	_h = h;
-	_outlinecolor = outline;
-	_fillcolor = fill;
-	_textcolor = textcolor;
-	_textsize = textsize;
-	_gfx = gfx;
-	strncpy(_label, label, 9);
-	_label[9] = 0;
-}
 
-void Adafruit_GFX_Button::drawButton(bool inverted)
+// create printscreen and save it into bitmap
+void ILI9341_ESP::printscreen(int32_t x, int32_t y, int32_t w, int32_t h, const char *fileName)
 {
-	uint16_t fill, outline, text;
+   if(!SPIFFS.begin())
+      return;
+   
+   Dir dir = SPIFFS.openDir("/");
+   
+   //open file
+   File file = SPIFFS.open(fileName, "w");
+   if(!file){
+      SPIFFS.end();
+      return;
+   }
+   
+   //file size
+   uint32_t size = 14+56+w*h*2;
+   
+   //write headers
+   uint8_t header[14] = { };
+      header[0] = 0x42;
+      header[1] = 0x4D;
+      //size
+      *((uint32_t*)(header+2)) = size;
+      //data offset
+      header[10] = 0x46;
 
-	if (! inverted) {
-		fill = _fillcolor;
-		outline = _outlinecolor;
-		text = _textcolor;
-	} else {
-		fill =  _textcolor;
-		outline = _outlinecolor;
-		text = _fillcolor;
+   uint8_t dib[56] = {};
+      //dib size
+      dib[0] = 56;
+      //width
+      *((int32_t*)(dib+4)) = w;
+      //height (negative for top/bottom order)
+      *((int32_t*)(dib+8)) = -h;
+      //planes count
+      dib[12] = 1;
+      //bits per pixel
+      dib[14] = 16;
+      //compression = BI_BITFIELDS
+      dib[16] = 3;
+      //raw data size
+      *((uint32_t*)(dib+20)) = w*h*2;
+      //print resolution horizontal
+      *((uint32_t*)(dib+24)) = 2835;      
+      //print resolution vertical
+      *((uint32_t*)(dib+28)) = 2835;
+      //red bits mask
+      *((uint32_t*)(dib+40)) = 0xF800;      
+      //green bits mask
+      *((uint32_t*)(dib+44)) = 0x7E0;      
+      //blue bits mask
+      *((uint32_t*)(dib+48)) = 0x1F; 
+
+   file.write(header,14);
+   file.write(dib,56);
+   
+   //read screendata
+	uint8_t r,g,b;
+	uint32_t c = w * h;
+   uint16_t pixel;
+
+	setAddr(x, y, x+w-1, y+h-1);
+	writecommand_cont(ILI9341_RAMRD); // read from RAM
+	
+   SPI.transfer(0);	// Read a DUMMY bytes
+   SPI.transfer(0);
+   SPI.transfer(0);
+   SPI.transfer(0);
+   
+	while (c--) {
+      r = SPI.transfer(0);		// Read a RED byte of GRAM
+      g = SPI.transfer(0);		// Read a GREEN byte of GRAM
+      b = SPI.transfer(0);		// Read a BLUE byte of GRAM
+      
+      pixel = color565(r,g,b);
+      file.write(pixel & 0xFF);
+      file.write((pixel >> 8) & 0xFF);
 	}
-	_gfx->fillRoundRect(_x - (_w/2), _y - (_h/2), _w, _h, min(_w,_h)/4, fill);
-	_gfx->drawRoundRect(_x - (_w/2), _y - (_h/2), _w, _h, min(_w,_h)/4, outline);
-	_0gfx->setCursor(_x - strlen(_label)*3*_textsize, _y-4*_textsize);
-	_gfx->setTextColor(text);
-	_gfx->setTextSize(_textsize);
-	_gfx->print(_label);
+
+   //close file
+   file.flush();
+   file.close();
+      
+   SPIFFS.end(); 
 }
-
-bool Adafruit_GFX_Button::contains(int16_t x, int16_t y)
-{
-	if ((x < (_x - _w/2)) || (x > (_x + _w/2))) return false;
-	if ((y < (_y - _h/2)) || (y > (_y + _h/2))) return false;
-	return true;
-}*/
-
